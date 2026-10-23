@@ -3,6 +3,8 @@
   "authmod.gui.title.login": "账号登录",
   "authmod.gui.title.change": "修改密码",
   "authmod.gui.field.password": "密码",
+  "authmod.gui.password.show": "显示密码",
+  "authmod.gui.password.hide": "隐藏密码",
   "authmod.gui.field.confirm": "确认密码",
   "authmod.gui.field.old": "当前密码",
   "authmod.gui.button.register": "注册",
