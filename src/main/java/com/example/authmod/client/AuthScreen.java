@@ -12,7 +12,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
@@ -23,16 +22,10 @@ import org.lwjgl.glfw.GLFW;
 
 @OnlyIn(Dist.CLIENT)
 public final class AuthScreen extends Screen {
-    private static final char MASK_CHAR = '*';
-    private static final int PASSWORD_FIELD_WIDTH = 196;
-    private static final int VISIBILITY_BUTTON_OFFSET = 200;
-    private static final int VISIBILITY_BUTTON_SIZE = 20;
-
     private final Mode mode;
     private final String username;
     private final int maxAttempts;
     private final List<EditBox> fields = new ArrayList<>();
-    private final List<PasswordControl> passwordControls = new ArrayList<>();
     private EditBox passwordField;
     private EditBox oldPasswordField;
     private EditBox newPasswordField;
@@ -55,13 +48,12 @@ public final class AuthScreen extends Screen {
     @Override
     protected void init() {
         fields.clear();
-        passwordControls.clear();
         int fieldCount = mode == Mode.LOGIN ? 1 : mode == Mode.CHANGE_PASSWORD ? 3 : 2;
         panelHeight = mode == Mode.LOGIN ? 174 : mode == Mode.REGISTER ? 208 : 242;
         panelLeft = (width - 260) / 2;
         panelTop = (height - panelHeight) / 2;
         int fieldX = panelLeft + 18;
-        int fieldWidth = PASSWORD_FIELD_WIDTH;
+        int fieldWidth = 224;
         int startY = panelTop + 58;
 
         if (mode == Mode.LOGIN) {
@@ -101,7 +93,6 @@ public final class AuthScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        maskUnfocusedFields();
         renderBackground(graphics, mouseX, mouseY, partialTick);
         graphics.fill(panelLeft, panelTop, panelLeft + 260, panelTop + panelHeight, 0xC8000000);
         graphics.fill(panelLeft, panelTop, panelLeft + 260, panelTop + 1, 0xFFE0E0E0);
@@ -122,34 +113,12 @@ public final class AuthScreen extends Screen {
                 feedbackIsError ? 0xFFFF5555 : 0xFF55FF55);
         }
         super.render(graphics, mouseX, mouseY, partialTick);
-        for (PasswordControl control : passwordControls) {
-            drawEyeIcon(graphics, control);
-        }
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == GLFW.GLFW_MOUSE_BUTTON_1) {
-            for (PasswordControl control : passwordControls) {
-                if (control.visibilityButton.isMouseOver(mouseX, mouseY)) {
-                    // Keep the field focused so the visibility button does not cause a blur/mask flicker.
-                    setFocused(control.field);
-                    control.field.setFocused(true);
-                    control.toggleVisibility();
-                    return true;
-                }
-            }
-        }
-        boolean handled = super.mouseClicked(mouseX, mouseY, button);
-        maskUnfocusedFields();
-        return handled;
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == GLFW.GLFW_KEY_TAB && fields.size() > 1) {
             cycleFieldFocus();
-            maskUnfocusedFields();
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
@@ -158,8 +127,7 @@ public final class AuthScreen extends Screen {
             }
             return true;
         }
-        boolean handled = super.keyPressed(keyCode, scanCode, modifiers);
-        return handled;
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
@@ -169,16 +137,9 @@ public final class AuthScreen extends Screen {
 
     @Override
     public void onClose() {
-        maskAllFields();
         if (mode == Mode.CHANGE_PASSWORD) {
             super.onClose();
         }
-    }
-
-    @Override
-    public void removed() {
-        maskAllFields();
-        super.removed();
     }
 
     @Override
@@ -190,7 +151,6 @@ public final class AuthScreen extends Screen {
         if (packet.mode() != mode.id) {
             return;
         }
-        maskAllFields();
         processing = false;
         if (packet.success()) {
             Minecraft.getInstance().setScreen(null);
@@ -205,10 +165,8 @@ public final class AuthScreen extends Screen {
         EditBox field = new EditBox(font, x, y + 12, fieldWidth, 18,
             Component.translatable(labelKey));
         field.setMaxLength(64);
-        PasswordControl control = new PasswordControl(field);
-        passwordControls.add(control);
-        // Render-only masking preserves EditBox's real value, cursor, selection, filter, and IME behavior.
-        field.setFormatter((value, cursor) -> formatPassword(control, value, cursor));
+        field.setFormatter((value, cursor) ->
+            FormattedCharSequence.forward("•".repeat(value.length()), Style.EMPTY));
         field.setHint(Component.translatable(labelKey));
         field.setResponder(value -> {
             feedback = null;
@@ -217,80 +175,7 @@ public final class AuthScreen extends Screen {
         });
         fields.add(field);
         addRenderableWidget(field);
-        control.visibilityButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
-                setFocused(field);
-                field.setFocused(true);
-                control.toggleVisibility();
-            })
-            .bounds(x + VISIBILITY_BUTTON_OFFSET, y + 12, VISIBILITY_BUTTON_SIZE, 18)
-            .tooltip(Tooltip.create(Component.translatable("authmod.gui.password.show")))
-            .build());
         return field;
-    }
-
-    private FormattedCharSequence formatPassword(PasswordControl control, String value, int cursor) {
-        if (control.showAll) {
-            return FormattedCharSequence.forward(value, Style.EMPTY);
-        }
-
-        String fullValue = control.field.getValue();
-        int caret = Math.max(0, Math.min(fullValue.length(), control.field.getCursorPosition()));
-        boolean selectionEmpty = control.field.getHighlighted().isEmpty();
-        int visibleCharacterStart = control.field.isFocused() && !processing && selectionEmpty && caret > 0
-            ? fullValue.offsetByCodePoints(caret, -1)
-            : -1;
-
-        // In 1.21.4 EditBox formats separate text slices around the caret. Its formatter argument
-        // is the slice's start offset (displayPos for the prefix), not consistently the caret.
-        // Translate the real field caret into this slice so the character before it is revealed.
-        int visibleOffsetInSlice = visibleCharacterStart - cursor;
-
-        StringBuilder rendered = new StringBuilder(value.length());
-        for (int offset = 0; offset < value.length();) {
-            int codePoint = value.codePointAt(offset);
-            if (offset == visibleOffsetInSlice) {
-                rendered.appendCodePoint(codePoint);
-            } else {
-                rendered.append(MASK_CHAR);
-            }
-            offset += Character.charCount(codePoint);
-        }
-        return FormattedCharSequence.forward(rendered.toString(), Style.EMPTY);
-    }
-
-    private void drawEyeIcon(GuiGraphics graphics, PasswordControl control) {
-        Button button = control.visibilityButton;
-        int centerX = button.getX() + button.getWidth() / 2;
-        int centerY = button.getY() + button.getHeight() / 2;
-        int color = button.isHoveredOrFocused() ? 0xFFFFFFFF : 0xFFD0D0D0;
-
-        // Small pixel eye keeps the icon crisp with Minecraft's scaled GUI and needs no texture asset.
-        graphics.fill(centerX - 6, centerY - 1, centerX - 3, centerY + 2, color);
-        graphics.fill(centerX - 3, centerY - 3, centerX + 3, centerY - 1, color);
-        graphics.fill(centerX - 3, centerY + 2, centerX + 3, centerY + 4, color);
-        graphics.fill(centerX + 3, centerY - 1, centerX + 6, centerY + 2, color);
-        graphics.fill(centerX - 1, centerY - 1, centerX + 2, centerY + 2, 0xFF202020);
-        if (!control.showAll) {
-            graphics.fill(centerX - 5, centerY + 4, centerX - 3, centerY + 5, color);
-            graphics.fill(centerX - 3, centerY + 2, centerX - 1, centerY + 4, color);
-            graphics.fill(centerX - 1, centerY, centerX + 1, centerY + 2, color);
-            graphics.fill(centerX + 1, centerY - 2, centerX + 3, centerY, color);
-            graphics.fill(centerX + 3, centerY - 4, centerX + 5, centerY - 2, color);
-        }
-    }
-
-    private void maskUnfocusedFields() {
-        for (PasswordControl control : passwordControls) {
-            if (!control.field.isFocused()) {
-                control.mask();
-            }
-        }
-    }
-
-    private void maskAllFields() {
-        for (PasswordControl control : passwordControls) {
-            control.mask();
-        }
     }
 
     private void cycleFieldFocus() {
@@ -321,11 +206,7 @@ public final class AuthScreen extends Screen {
     }
 
     private void submit() {
-        if (processing) {
-            return;
-        }
-        maskAllFields();
-        if (!validateFields()) {
+        if (processing || !validateFields()) {
             updateSubmitState();
             return;
         }
@@ -423,29 +304,6 @@ public final class AuthScreen extends Screen {
                 }
             }
             return LOGIN;
-        }
-    }
-
-    private static final class PasswordControl {
-        private final EditBox field;
-        private Button visibilityButton;
-        private boolean showAll;
-
-        private PasswordControl(EditBox field) {
-            this.field = field;
-        }
-
-        private void toggleVisibility() {
-            showAll = !showAll;
-            visibilityButton.setTooltip(Tooltip.create(Component.translatable(
-                showAll ? "authmod.gui.password.hide" : "authmod.gui.password.show")));
-        }
-
-        private void mask() {
-            showAll = false;
-            if (visibilityButton != null) {
-                visibilityButton.setTooltip(Tooltip.create(Component.translatable("authmod.gui.password.show")));
-            }
         }
     }
 }

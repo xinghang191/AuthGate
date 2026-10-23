@@ -2,9 +2,7 @@
 
 AuthGate is a GUI account registration and login mod for Minecraft Forge 1.21.4.
 It stores server-side accounts and password hashes, limits unauthenticated player
-actions, and provides password management commands. Password fields show only
-the character immediately before the caret while focused; use the eye button to
-temporarily reveal the full value.
+actions, and provides password management commands.
 
 ## Requirements
 

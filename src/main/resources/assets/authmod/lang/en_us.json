@@ -3,8 +3,6 @@
   "authmod.gui.title.login": "Account Login",
   "authmod.gui.title.change": "Change Password",
   "authmod.gui.field.password": "Password",
-  "authmod.gui.password.show": "Show password",
-  "authmod.gui.password.hide": "Hide password",
   "authmod.gui.field.confirm": "Confirm password",
   "authmod.gui.field.old": "Current password",
   "authmod.gui.button.register": "Register",
